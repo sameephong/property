@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>รวมทรัพย์ให้เช่า-ขาย</title>
+<meta name="description" content="ห้องพัก บ้าน คอนโด ที่ดิน ให้เช่าและขาย">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<style>
+  header{padding:26px 0 8px}
+  .count{color:var(--muted);font-size:14px;margin:0 0 12px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;overflow:hidden;cursor:pointer;display:flex;flex-direction:column;text-align:left;font:inherit;color:inherit;padding:0}
+  .card:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .card.off{opacity:.62}
+  .photo{aspect-ratio:16/10;display:grid;place-items:center;font-size:44px;position:relative;background:linear-gradient(135deg,var(--accent-soft),var(--bg));overflow:hidden}
+  .photo img{width:100%;height:100%;object-fit:cover;position:absolute;inset:0}
+  .badges{position:absolute;top:10px;left:10px;display:flex;gap:6px;flex-wrap:wrap}
+  .badge{font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px;background:var(--accent-soft);color:var(--accent)}
+  .badge.sale{background:var(--sale-soft);color:var(--sale)}
+  .badge.warn{background:var(--warn-soft);color:var(--warn)}
+  .badge.off{background:var(--ink);color:var(--bg)}
+  .vid{position:absolute;right:10px;bottom:10px;background:rgba(0,0,0,.6);color:#fff;font-size:12px;padding:2px 8px;border-radius:999px}
+  .body{padding:14px 16px 16px;display:flex;flex-direction:column;gap:2px;flex:1}
+  .title{font-weight:600;font-size:16px;margin:0}
+  .loc{color:var(--muted);font-size:14px;margin:0}
+  .card .price{font-size:20px;margin-top:6px}
+  footer{margin-top:36px;color:var(--muted);font-size:13px;text-align:center}
+  .live{display:inline-flex;align-items:center;gap:6px}
+  .dot{width:8px;height:8px;border-radius:50%;background:#2fb37a}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1 id="siteName">รวมทรัพย์ให้เช่า-ขาย</h1>
+    <p class="sub" id="siteTag"></p>
+  </header>
+
+  <div class="controls">
+    <input class="search" id="q" type="search" placeholder="ค้นหาทำเล ชื่อ หรือรหัสทรัพย์" aria-label="ค้นหา">
+    <div class="chips" id="dealChips" role="group" aria-label="เช่าหรือขาย"></div>
+    <div class="chips" id="typeChips" role="group" aria-label="ประเภททรัพย์"></div>
+    <div class="chips" id="priceChips" role="group" aria-label="ช่วงราคา"></div>
+    <div class="range">
+      <input id="pMin" inputmode="numeric" placeholder="ราคาต่ำสุด" aria-label="ราคาต่ำสุด">
+      <span>–</span>
+      <input id="pMax" inputmode="numeric" placeholder="ราคาสูงสุด" aria-label="ราคาสูงสุด">
+      <button class="chip" type="button" id="pClear">ล้าง</button>
+    </div>
+  </div>
+
+  <p class="count" id="count"></p>
+  <div class="grid" id="grid"><p class="msg">กำลังโหลดข้อมูล…</p></div>
+
+  <footer><span class="live"><span class="dot"></span><span id="stamp">ข้อมูลสด</span></span></footer>
+</div>
+
+<div class="overlay" id="overlay" aria-hidden="true"><div class="sheet" id="sheet" role="dialog" aria-modal="true"></div></div>
+<div class="toast" id="toast"></div>
+
+<script src="config.js"></script>
+<script src="media.js"></script>
+<script>
+const C = window.APP_CONFIG, {esc, fmt, range, safeUrl} = Util;
+const $ = id => document.getElementById(id);
+const ICON = {"คอนโด":"🏢","อพาร์ทเม้นท์":"🏬","บ้าน":"🏡","ทาวน์โฮม":"🏘️","ที่ดิน":"🌳","อาคารพาณิชย์/ตึก":"🏪"};
+const AVAILABLE = s => s==="พร้อมปล่อย";
+const RENT_RANGES = [["ไม่เกิน 5,000",0,5000],["5,000–10,000",5000,10000],["10,000–15,000",10000,15000],["15,000–30,000",15000,30000],["30,000 ขึ้นไป",30000,null]];
+const SALE_RANGES = [["ไม่เกิน 1 ล้าน",0,1e6],["1–3 ล้าน",1e6,3e6],["3–5 ล้าน",3e6,5e6],["5–10 ล้าน",5e6,1e7],["10 ล้านขึ้นไป",1e7,null]];
+
+let items = [], deal = "ทั้งหมด", type = "ทั้งหมด", q = "", pMin = null, pMax = null, openCode = null, loadedOnce = false;
+
+document.title = C.SITE_NAME; $("siteName").textContent = C.SITE_NAME; $("siteTag").textContent = C.SITE_TAGLINE || "";
+
+/* ---------- โหลดข้อมูลสดจาก Google Sheet ---------- */
+async function load(){
+  try{
+    const r = await fetch(C.API_URL + (C.API_URL.includes("?") ? "&" : "?") + "action=public&t=" + Date.now());
+    const data = await r.json();
+    if(!data.ok) throw new Error(data.error);
+    const sig = JSON.stringify(data.items);
+    if(sig !== load.sig){ load.sig = sig; items = data.items; render(); if(openCode) refreshDetail(); }
+    const t = new Date(data.at || Date.now());
+    $("stamp").textContent = "ข้อมูลสด · อัปเดต " + t.toLocaleTimeString("th-TH",{hour:"2-digit",minute:"2-digit"}) + " น.";
+    loadedOnce = true;
+  }catch(e){
+    if(!loadedOnce) $("grid").innerHTML = `<p class="msg">โหลดข้อมูลไม่ได้ ลองรีเฟรชหน้าอีกครั้ง</p>`;
+  }
+}
+setInterval(()=>{ if(document.visibilityState==="visible") load(); }, (C.REFRESH_SECONDS||60)*1000);
+document.addEventListener("visibilitychange", ()=>{ if(document.visibilityState==="visible") load(); });
+
+/* ---------- แสดงผล ---------- */
+function chips(el, values, isOn, onPick){
+  el.innerHTML = "";
+  values.forEach(([label, val])=>{
+    const b = document.createElement("button");
+    b.className = "chip"; b.type = "button"; b.textContent = label;
+    b.setAttribute("aria-pressed", String(isOn(val)));
+    b.onclick = ()=>{ onPick(val); render(); };
+    el.appendChild(b);
+  });
+}
+function priceHtml(p){
+  const out = [];
+  if(p.rent) out.push(`<div class="price">฿${range(p.rent,p.rentMax)} <small>/เดือน</small></div>`);
+  if(p.sale) out.push(`<div class="price sale">฿${range(p.sale,p.saleMax)} <small>ราคาขาย</small></div>`);
+  if(!out.length) out.push(`<div class="price"><small>สอบถามราคา</small></div>`);
+  return out.join("");
+}
+function badges(p){
+  const deals = p.deal==="เช่าหรือขาย" ? ["ให้เช่า","ขาย"] : [p.deal];
+  let h = deals.map(d=>`<span class="badge ${d==="ขาย"?"sale":""}">${esc(d)}</span>`).join("");
+  if(p.status==="ติดจอง") h += `<span class="badge warn">ติดจอง</span>`;
+  else if(p.status==="มีผู้เช่าแล้ว" || p.status==="ขายแล้ว") h += `<span class="badge off">${esc(p.status)}</span>`;
+  return `<div class="badges">${h}</div>`;
+}
+function cover(p){
+  const m = (p.media||[])[0];
+  const hasVid = (p.media||[]).some(Media.isVideo);
+  return `<div class="photo">${m ? `<img src="${Media.thumb(m.id, 800)}" alt="${esc(p.title)}" loading="lazy" referrerpolicy="no-referrer">` : (ICON[p.type]||"🏠")}${badges(p)}${hasVid?'<span class="vid">▶ มีวิดีโอ</span>':""}</div>`;
+}
+function priceOf(p){ return deal==="ให้เช่า" ? [p.rent] : deal==="ขาย" ? [p.sale] : [p.rent, p.sale]; }
+const inRange = v => v!=null && v!=="" && (pMin==null || v>=pMin) && (pMax==null || v<=pMax);
+function matches(p){
+  if(deal!=="ทั้งหมด" && !(p.deal===deal || p.deal==="เช่าหรือขาย")) return false;
+  if(type!=="ทั้งหมด" && p.type!==type) return false;
+  if((pMin!=null || pMax!=null) && !priceOf(p).some(inRange)) return false;
+  if(q && ![p.code,p.title,p.location,p.province,p.type].join(" ").toLowerCase().includes(q)) return false;
+  return true;
+}
+function setRange(a,b){ pMin=a; pMax=b; $("pMin").value = a==null?"":fmt(a); $("pMax").value = b==null?"":fmt(b); }
+function render(){
+  chips($("dealChips"), [["ทั้งหมด","ทั้งหมด"],["ให้เช่า","ให้เช่า"],["ขาย","ขาย"]], v=>deal===v, v=>{ if(v!==deal) setRange(null,null); deal=v; });
+  const types = [...new Set(items.map(p=>p.type).filter(Boolean))];
+  $("typeChips").hidden = types.length < 2;
+  chips($("typeChips"), [["ทุกประเภท","ทั้งหมด"], ...types.map(t=>[t,t])], v=>type===v, v=>type=v);
+  const R = deal==="ขาย" ? SALE_RANGES : RENT_RANGES;
+  chips($("priceChips"), R.map(([l,a,b])=>["฿ "+l, [a,b]]), ([a,b])=>pMin===a && pMax===b, ([a,b])=> (pMin===a && pMax===b) ? setRange(null,null) : setRange(a,b));
+  // ทรัพย์ที่ว่างขึ้นก่อน
+  const list = items.filter(matches).sort((a,b)=>(AVAILABLE(b.status)-AVAILABLE(a.status)) || a.code.localeCompare(b.code));
+  $("count").textContent = `${list.length} รายการ`;
+  if(!list.length){ $("grid").innerHTML = `<p class="msg">${items.length ? "ไม่พบทรัพย์ที่ตรงกับที่เลือก" : "ยังไม่มีทรัพย์ในตอนนี้"}</p>`; return; }
+  $("grid").innerHTML = list.map(p=>`
+    <button class="card ${AVAILABLE(p.status)||p.status==="ติดจอง"?"":"off"}" type="button" data-code="${esc(p.code)}">
+      ${cover(p)}
+      <div class="body">
+        <p class="title">${esc(p.title)}</p>
+        <p class="loc">📍 ${esc(p.location)} ${esc(p.province)}</p>
+        ${priceHtml(p)}
+      </div>
+    </button>`).join("");
+  document.querySelectorAll(".card").forEach(c=>c.onclick=()=>openDetail(c.dataset.code));
+}
+
+/* ---------- หน้ารายละเอียด ---------- */
+const row = (k,v) => v ? `<dt>${k}</dt><dd>${esc(v)}</dd>` : "";
+function openDetail(code){
+  const p = items.find(x=>x.code===code); if(!p) return;
+  openCode = code; refreshDetail.sig = JSON.stringify(p);
+  const media = p.media || [];
+  const line = safeUrl(p.lineUrl) || safeUrl(C.DEFAULT_LINE_URL);
+  const map = safeUrl(p.mapUrl);
+  $("sheet").innerHTML = `
+    <button class="close" type="button" aria-label="ปิด" id="xBtn">✕</button>
+    ${media.length ? `<div class="slider">${media.map((m,i)=>`<div class="slide">${Media.isVideo(m)
+        ? `<iframe src="${Media.player(m.id)}" allow="autoplay; fullscreen" allowfullscreen loading="lazy" title="วิดีโอ"></iframe>`
+        : `<img src="${Media.thumb(m.id,1600)}" alt="" loading="lazy" referrerpolicy="no-referrer">`}${media.length>1?`<span class="n">${i+1}/${media.length}</span>`:""}</div>`).join("")}</div>`
+      : `<div style="height:20px"></div>`}
+    <p class="loc">รหัส ${esc(p.code)}</p>
+    <h2>${esc(p.title)}</h2>
+    <p class="loc">📍 ${esc(p.location)} ${esc(p.province)}</p>
+    <div style="margin:8px 0">${priceHtml(p)}</div>
+    <span class="pill ${p.status==="พร้อมปล่อย"?"s-ready":p.status==="ติดจอง"?"s-hold":"s-done"}">${esc(p.status==="พร้อมปล่อย" ? (p.deal==="ขาย"?"พร้อมขาย":"ว่าง พร้อมเข้าอยู่") : p.status)}</span>
+    <h3>รายละเอียด</h3>
+    <dl>
+      ${row("ประเภท",p.type)}${row("ขนาด",p.size)}${row("ห้องนอน",p.beds)}${row("ห้องน้ำ",p.baths)}
+      ${row("จุดเด่น",p.highlights)}${row("เงื่อนไข",p.terms)}${row("ติดต่อ",p.contact)}
+    </dl>
+    <div class="actions">
+      ${line ? `<a class="btn line full" href="${esc(line)}" target="_blank" rel="noopener">ทักไลน์สอบถาม / นัดดู</a>` : ""}
+      ${map ? `<a class="btn" href="${esc(map)}" target="_blank" rel="noopener">ดูแผนที่</a>` : ""}
+      <button class="btn ${map?"":"full"}" type="button" id="shareBtn">แชร์ให้เพื่อน</button>
+    </div>
+    <p class="loc" style="margin-top:12px;font-size:12px">อัปเดตล่าสุด ${esc(p.updated||"-")}</p>`;
+  $("overlay").classList.add("open"); $("overlay").setAttribute("aria-hidden","false");
+  $("xBtn").onclick = closeDetail;
+  $("shareBtn").onclick = async ()=>{
+    const url = location.origin + location.pathname + "#" + encodeURIComponent(p.code);
+    const text = Util.postText(p) + "\n" + url;
+    if(navigator.share){ try{ await navigator.share({title:p.title, text, url}); return; }catch(e){ if(e.name==="AbortError") return; } }
+    toast(await Util.copy(text) ? "คัดลอกข้อความ + ลิงก์แล้ว" : "คัดลอกไม่ได้");
+  };
+  history.replaceState(null, "", "#" + encodeURIComponent(code));
+}
+function refreshDetail(){
+  const p = items.find(x=>x.code===openCode);
+  if(!p){ closeDetail(); return; }
+  // วาดใหม่เฉพาะเมื่อทรัพย์ที่เปิดดูอยู่มีการเปลี่ยน (จะได้ไม่ตัดวิดีโอที่ลูกค้ากำลังดู)
+  if(JSON.stringify(p) === refreshDetail.sig) return;
+  const scroll = $("sheet").scrollTop; openDetail(openCode); $("sheet").scrollTop = scroll;
+}
+function closeDetail(){
+  openCode = null; $("overlay").classList.remove("open"); $("overlay").setAttribute("aria-hidden","true");
+  history.replaceState(null, "", location.pathname + location.search);
+}
+function toast(t){ const el=$("toast"); el.textContent=t; el.classList.add("show"); setTimeout(()=>el.classList.remove("show"),1800); }
+
+$("overlay").addEventListener("click", e=>{ if(e.target.id==="overlay") closeDetail(); });
+document.addEventListener("keydown", e=>{ if(e.key==="Escape") closeDetail(); });
+$("q").addEventListener("input", e=>{ q=e.target.value.trim().toLowerCase(); render(); });
+const num = s => { const n = Number(String(s).replace(/[^\d.]/g,"")); return String(s).trim()!=="" && isFinite(n) ? n : null; };
+["pMin","pMax"].forEach(id=>$(id).addEventListener("input", ()=>{
+  pMin = num($("pMin").value); pMax = num($("pMax").value);
+  if(pMin!=null && pMax!=null && pMin>pMax) [pMin,pMax] = [pMax,pMin];
+  render();
+}));
+$("pClear").onclick = ()=>{ setRange(null,null); render(); };
+
+load().then(()=>{ const h = decodeURIComponent(location.hash.slice(1)); if(h && items.some(p=>p.code===h)) openDetail(h); });
+</script>
+</body>
+</html>
