@@ -231,12 +231,15 @@ function openDetail(code){
     <h3>ข้อความโพส (ไม่มีข้อมูลเจ้าของ)</h3>
     <pre class="post">${esc(Util.postText(p))}</pre>
     <div class="actions">
-      <button class="btn primary full" type="button" id="copyBtn">คัดลอกข้อความโพส</button>
+      <button class="btn primary full" type="button" id="copyBtn">คัดลอกข้อความโพส + ลิงก์</button>
+      <button class="btn full" type="button" id="linkBtn">คัดลอกลิงก์ทรัพย์นี้</button>
       <button class="btn" type="button" id="editBtn">แก้ไข</button>
       <button class="btn danger" type="button" id="delBtn">ลบ</button>
     </div>
     <p class="web" style="margin-top:12px">อัปเดตล่าสุด ${esc(p.updated||"-")}</p>`);
-  $("copyBtn").onclick = async()=> toast(await Util.copy(Util.postText(p)) ? "คัดลอกแล้ว" : "คัดลอกไม่ได้");
+  const link = new URL("./", location.href).href + "#" + p.code;
+  $("copyBtn").onclick = async()=> toast(await Util.copy(Util.postText(p) + "\n\n👉 ดูรูปและรายละเอียด: " + link) ? "คัดลอกข้อความ + ลิงก์แล้ว" : "คัดลอกไม่ได้");
+  $("linkBtn").onclick = async()=> toast(await Util.copy(link) ? "คัดลอกลิงก์แล้ว" : "คัดลอกไม่ได้");
   $("editBtn").onclick = ()=>openForm(p);
   $("delBtn").onclick = async()=>{
     const b = $("delBtn");

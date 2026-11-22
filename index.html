@@ -182,18 +182,21 @@ function openDetail(code){
     </dl>
     <div class="actions">
       ${line ? `<a class="btn line full" href="${esc(line)}" target="_blank" rel="noopener">ทักไลน์สอบถาม / นัดดู</a>` : ""}
-      ${map ? `<a class="btn" href="${esc(map)}" target="_blank" rel="noopener">ดูแผนที่</a>` : ""}
-      <button class="btn ${map?"":"full"}" type="button" id="shareBtn">แชร์ให้เพื่อน</button>
+      ${map ? `<a class="btn full" href="${esc(map)}" target="_blank" rel="noopener">ดูแผนที่</a>` : ""}
+      <button class="btn" type="button" id="shareBtn">แชร์</button>
+      <button class="btn" type="button" id="linkBtn">คัดลอกลิงก์</button>
     </div>
     <p class="loc" style="margin-top:12px;font-size:12px">อัปเดตล่าสุด ${esc(p.updated||"-")}</p>`;
   $("overlay").classList.add("open"); $("overlay").setAttribute("aria-hidden","false");
   $("xBtn").onclick = closeDetail;
+  const url = location.origin + location.pathname + "#" + p.code;
+  const text = Util.postText(p) + "\n\n👉 ดูรูปและรายละเอียด: " + url;
+  // ใส่ลิงก์ไว้ในข้อความเลย ไม่แยกเป็น url — บางแอป (เช่น LINE) ตัดลิงก์ทิ้งถ้าส่งแยก
   $("shareBtn").onclick = async ()=>{
-    const url = location.origin + location.pathname + "#" + encodeURIComponent(p.code);
-    const text = Util.postText(p) + "\n" + url;
-    if(navigator.share){ try{ await navigator.share({title:p.title, text, url}); return; }catch(e){ if(e.name==="AbortError") return; } }
+    if(navigator.share){ try{ await navigator.share({ text }); return; }catch(e){ if(e.name==="AbortError") return; } }
     toast(await Util.copy(text) ? "คัดลอกข้อความ + ลิงก์แล้ว" : "คัดลอกไม่ได้");
   };
+  $("linkBtn").onclick = async ()=> toast(await Util.copy(url) ? "คัดลอกลิงก์แล้ว" : "คัดลอกไม่ได้");
   history.replaceState(null, "", "#" + encodeURIComponent(code));
 }
 function refreshDetail(){
